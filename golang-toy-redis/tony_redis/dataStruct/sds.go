@@ -10,6 +10,7 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 	"unsafe"
 )
 
@@ -24,7 +25,7 @@ import (
 			but i don't know how to achieve this op in golang ==> not to achieve.
 			use flag=buf[0] to replace it.
 			it maybe to more waste size.
-		about gc&point(wrong.....,i'm wrong,Point is right):
+		about gc&point:
 			I try to use ori tony_redis template,save shiftPoint to point buffer,but because
 			gc,if not used point item ==> free memory.
 		about interface:
@@ -32,24 +33,15 @@ import (
 			can't to use it
 		about single struct func:
 			it's not elegant.through now isn't enough elegant
+		final struct:
+			direly use point to memory,"dynamic type" skip struct
 */
 
-//sds_type_sigmoid
-const (
-	SDS_TYPE_5 byte = iota
-	SDS_TYPE_8
-	SDS_TYPE_16
-	SDS_TYPE_32
-	SDS_TYPE_64
-	SDS_TYPE_LEN   byte = 3
-	SDS_MAX_EXPAND int  = 1024 * 1024
-	SDS_MAX_TYPE_5      = 31
-)
-
 type (
-	sdshdr5 struct {
+	sdsDataType = byte
+	sdshdr5     struct {
 		/*
-			flags:(1 byte)[0-2:(sds_type_sigmoid),3-7:(free)]
+			flags:(1 sdsDataType)[0-2:(sds_type_sigmoid),3-7:(free)]
 				max sdsType==> max flag==4 flag only need 3bit
 			about pack position:
 				because i can't pack position,so ==> flag insert into buf
@@ -59,8 +51,8 @@ type (
 				direct to pos type==buf[0:....] is very dangerous.
 			buf: data save address
 		*/
-		//flags byte
-		buf []byte
+		//flags sdsDataType
+		buf []sdsDataType
 	}
 
 	/*
@@ -68,38 +60,51 @@ type (
 		alloc:already use size
 	*/
 	sdshdr8 struct {
-		//flags byte
+		//flags sdsDataType
 		len   uint8
 		alloc uint8
-		buf   []byte
+		buf   []sdsDataType
 	}
 
 	sdshdr16 struct {
-		//flags byte
+		//flags sdsDataType
 		len   uint16
 		alloc uint16
-		buf   []byte
+		buf   []sdsDataType
 	}
 
 	sdshdr32 struct {
-		//flags byte
+		//flags sdsDataType
 		len   uint32
 		alloc uint32
-		buf   []byte
+		buf   []sdsDataType
 	}
 
 	sdshdr64 struct {
-		//flags byte
+		//flags sdsDataType
 		len   uint64
 		alloc uint64
-		buf   []byte
+		buf   []sdsDataType
 	}
 
 	sdshdr struct {
+		//direly use point to memory,"dynamic type" skip struct
 		len   unsafe.Pointer
 		alloc unsafe.Pointer
-		buf   *[]byte
+		buf   *[]sdsDataType
 	}
+)
+
+//sds_type_sigmoid
+const (
+	SDS_TYPE_5 sdsDataType = iota
+	SDS_TYPE_8
+	SDS_TYPE_16
+	SDS_TYPE_32
+	SDS_TYPE_64
+	SDS_TYPE_LEN   sdsDataType = 3
+	SDS_MAX_EXPAND int         = 1024 * 1024
+	SDS_MAX_TYPE_5             = 31
 )
 
 func JudgeSdsType(initLen int) byte {
@@ -121,8 +126,8 @@ func JudgeSdsType(initLen int) byte {
 	}
 }
 
-//func NewSds(initLen int)*[]byte{
-func NewSds(initLen int, initData []byte) *sdshdr {
+//func NewSds(initLen int)*[]sdsDataType{
+func NewSds(initLen int, initData []sdsDataType) *sdshdr {
 	/*
 		ori tony_redis function name is ["sdsnewlen"]
 		init New Sds
@@ -139,14 +144,14 @@ func NewSds(initLen int, initData []byte) *sdshdr {
 	//give up version:[init buffer&type,[+1+1]=='\0'&flag],because gc
 	//init buffer,[+1]=='\0'
 	initAlloc := 0
-	buf := make([]byte, initLen+1)
+	buf := make([]sdsDataType, initLen+1)
 	if len(initData) != 0 {
 		copy(buf[1:], initData)
 		initAlloc = len(initData)
 	}
 	buf[0] = sdsType
 	if sdsType == SDS_TYPE_5 {
-		buf[0] = sdsType | byte(initLen)<<SDS_TYPE_LEN
+		buf[0] = sdsType | sdsDataType(initLen)<<SDS_TYPE_LEN
 	}
 
 	switch sdsType {
@@ -179,47 +184,47 @@ func NewSds(initLen int, initData []byte) *sdshdr {
 	}
 }
 
-func GetData(sds *sdshdr) *[]byte {
+func (sds *sdshdr) GetData() *[]sdsDataType {
 	data := *sds.buf
 	data = data[1:]
 	return &data
 }
 
 //fail try
-//func GetFlag(buf *[]byte)*byte{
+//func GetFlag(buf *[]sdsDataType)*sdsDataType{
 //	dataPoint:=&(*buf)[0]
 //	tempP:=uintptr(unsafe.Pointer(dataPoint))
 //	tempP--
-//	sdsType:=(*byte)(unsafe.Pointer(tempP))
+//	sdsType:=(*sdsDataType)(unsafe.Pointer(tempP))
 //
 //	return sdsType
 //}
 
-func GetType(sdsType *sdshdr) byte {
-	return (*sdsType.buf)[0] & 0b00000111
+func (sds *sdshdr) GetType() sdsDataType {
+	return (*sds.buf)[0] & 0b00000111
 }
 
-func GetCapacity(buf *sdshdr, sdsType byte) (int, int) {
-	//structPoint := GetStructPoint(buf, sdsType)
+func (sds *sdshdr) GetCapacity(sdsType sdsDataType) (int, int) {
+	//structPoint := GetStructPoint(sds, sdsType)
 	switch sdsType {
 	case SDS_TYPE_5:
-		sdsLen := int((*buf.buf)[0]&0b11111000) >> SDS_TYPE_LEN
+		sdsLen := int((*sds.buf)[0]&0b11111000) >> SDS_TYPE_LEN
 		return sdsLen, sdsLen
 
 	case SDS_TYPE_8:
-		sds := (*sdshdr8)(buf.len)
+		sds := (*sdshdr8)(sds.len)
 		return int(sds.len), int(sds.alloc)
 
 	case SDS_TYPE_16:
-		sds := (*sdshdr16)(buf.len)
+		sds := (*sdshdr16)(sds.len)
 		return int(sds.len), int(sds.alloc)
 
 	case SDS_TYPE_32:
-		sds := (*sdshdr32)(buf.len)
+		sds := (*sdshdr32)(sds.len)
 		return int(sds.len), int(sds.alloc)
 
 	case SDS_TYPE_64:
-		sds := (*sdshdr64)(buf.len)
+		sds := (*sdshdr64)(sds.len)
 		return int(sds.len), int(sds.alloc)
 
 	default:
@@ -228,7 +233,7 @@ func GetCapacity(buf *sdshdr, sdsType byte) (int, int) {
 }
 
 //fail try
-//func GetStructPoint(buf *[]byte,sdsType byte)unsafe.Pointer{
+//func GetStructPoint(buf *[]sdsDataType,sdsType sdsDataType)unsafe.Pointer{
 //	switch sdsType{
 //	case SDS_TYPE_5:
 //		return unsafe.Pointer(buf)
@@ -245,12 +250,12 @@ func GetCapacity(buf *sdshdr, sdsType byte) (int, int) {
 //	}
 //}
 
-func SetCapacity(sds *sdshdr, len int, alloc int) {
-	sdsType := GetType(sds)
+func (sds *sdshdr) SetCapacity(len int, alloc int) {
+	sdsType := sds.GetType()
 	//structPoint:=GetStructPoint(buf,sdsType)
 	switch sdsType {
 	case SDS_TYPE_5:
-		(*sds.buf)[0] = byte(len) << 5
+		(*sds.buf)[0] = sdsDataType(len) << 5
 
 	case SDS_TYPE_8:
 		sds := (*sdshdr8)(sds.len)
@@ -271,18 +276,30 @@ func SetCapacity(sds *sdshdr, len int, alloc int) {
 	}
 }
 
-func ConcatSds(sds *sdshdr, aim *[]byte) *sdshdr {
-	sdsType := GetType(sds)
-	sdsLen, sdsAlloc := GetCapacity(sds, sdsType)
-	sds = ExpandSds(sds, aim, sdsLen, sdsAlloc)
+func (sds *sdshdr) ConcatSds(aim *[]sdsDataType) *sdshdr {
+	/*
+		Merge sdshdr & []sdsDataType wrapper function
+		return: concat new function
+	*/
+	sdsType := sds.GetType()
+	sdsLen, sdsAlloc := sds.GetCapacity(sdsType)
+	sds = sds.ExpandSds(aim, sdsLen, sdsAlloc)
 
 	return sds
 }
 
-func ExpandSds(sds *sdshdr, aim *[]byte, sdsLen int, sdsAlloc int) *sdshdr {
+func (sds *sdshdr) ExpandSds(aim *[]sdsDataType, sdsLen int, sdsAlloc int) *sdshdr {
+	/*
+		auto choose type to expandSds sds
+		rule:
+			if all_expand_size==>Type 5==>Auto use Type 8 as new size
+				==>all_expand_size=32
+			if all_expand_size<1M ==> needSize*2
+				else needSize+1M
+	*/
 	aimLen := len(*aim)
 	sdsNeed := sdsAlloc + aimLen
-	srcData := GetData(sds)
+	srcData := sds.GetData()
 
 	if sdsAlloc == -1 {
 		sdsNeed = aimLen + 32
@@ -290,7 +307,7 @@ func ExpandSds(sds *sdshdr, aim *[]byte, sdsLen int, sdsAlloc int) *sdshdr {
 
 	if sdsNeed <= sdsLen {
 		copy((*srcData)[sdsAlloc:], (*aim)[:aimLen])
-		SetCapacity(sds, sdsLen, sdsNeed)
+		sds.SetCapacity(sdsLen, sdsNeed)
 		return sds
 	} else {
 		if sdsNeed < SDS_MAX_EXPAND {
@@ -301,25 +318,45 @@ func ExpandSds(sds *sdshdr, aim *[]byte, sdsLen int, sdsAlloc int) *sdshdr {
 		if sdsNeed <= SDS_MAX_TYPE_5 {
 			sdsNeed = 32
 		}
-		expandSds := NewSds(sdsNeed, []byte{})
-		expandLen, _ := GetCapacity(expandSds, GetType(expandSds))
-		copy((*GetData(expandSds)), (*srcData)[:sdsAlloc])
-		SetCapacity(expandSds, expandLen, sdsAlloc)
-		copy((*GetData(expandSds))[sdsAlloc:], (*aim)[:aimLen])
-		SetCapacity(expandSds, expandLen, sdsAlloc+aimLen)
+		expandSds := NewSds(sdsNeed, []sdsDataType{})
+		expandLen, _ := expandSds.GetCapacity(expandSds.GetType())
+		copy((*expandSds.GetData()), (*srcData)[:sdsAlloc])
+		expandSds.SetCapacity(expandLen, sdsAlloc)
+		copy((*expandSds.GetData())[sdsAlloc:], (*aim)[:aimLen])
+		expandSds.SetCapacity(expandLen, sdsAlloc+aimLen)
 
 		return expandSds
 	}
 
 }
 
+func (sds *sdshdr) DelSds() {
+	/*
+		clear sds,free memory
+	*/
+	sds.alloc = nil
+	sds.buf = nil
+	sds.len = nil
+	runtime.GC()
+}
+
+func (sds *sdshdr) ClearSds() {
+	/*
+		only clear alloc,don't use to reAlloc memory.
+	*/
+	sdsType := sds.GetType()
+	sdsLen, _ := sds.GetCapacity(sdsType)
+	sds.SetCapacity(sdsLen, 0)
+}
+
 func main() {
-	testData := []byte{1, 2, 3, 4}
-	sds := NewSds(32, testData)
-	fmt.Println(GetType(sds))
-	fmt.Println(GetCapacity(sds, GetType(sds)))
-	fmt.Println(*sds.buf)
-	fmt.Println(GetData(sds))
-	sds = ConcatSds(sds, &testData)
-	fmt.Println(*sds.buf)
+	testData := []sdsDataType{1, 2, 3, 4}
+	sds := NewSds(10, testData)
+	fmt.Println(sds.GetType())
+	fmt.Println(sds.GetCapacity(sds.GetType()))
+	sds = sds.ConcatSds(&testData)
+	sds.ClearSds()
+	fmt.Println(sds.GetCapacity(sds.GetType()))
+	sds.DelSds()
+	fmt.Println(sds)
 }
