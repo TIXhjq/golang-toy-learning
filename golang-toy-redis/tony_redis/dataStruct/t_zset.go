@@ -239,23 +239,28 @@ func (zsk *ZSkipList) DeleteZSkipNode(aimNode *ZSkipListNode, preNodeStack *[]*Z
 func (zsk *ZSkipList) FreeZSkNode(aimNode *ZSkipListNode) {
 	aimNode.backward = nil
 	aimNode.element = nil
-	levelIdx := 0
-	for node := aimNode.level[levelIdx]; node.forward != nil; node = aimNode.level[levelIdx] {
-		node.forward = nil
-		levelIdx++
+
+	for levelIdx := 0; levelIdx < len(aimNode.level); levelIdx++ {
+		aimNode.level[levelIdx].forward = nil
 	}
 	aimNode.level = nil
 }
 
-func (zsk *ZSkipList) DeleteZSkList() {
-	zSkNode := zsk.head
-	for length := 0; length < zsk.level; length++ {
-		zSkNode = zSkNode.level[0].forward
-		zsk.FreeZSkNode(zSkNode.backward)
+func DeleteZSkList(zsk **ZSkipList) {
+	/*
+		destroy ZSkipList
+	*/
+	zSkNode := (*zsk).head
+	for length := uint(0); length < (*zsk).length; length++ {
+		nextNode := zSkNode.level[0].forward
+		(*zsk).FreeZSkNode(zSkNode)
+		zSkNode = nextNode
 	}
-	zsk.head = nil
-	zsk.tail = nil
-	zsk = nil
+	(*zsk).head = nil
+	(*zsk).tail = nil
+	(*zsk) = nil
+
+	//return zsk
 }
 
 func main() {
@@ -271,5 +276,6 @@ func main() {
 	if err := zsk.DeleteZSkipNode(zsk.FindZSKipNode(12, &a)); err != nil {
 		fmt.Println(err)
 	}
-
+	DeleteZSkList(&zsk)
+	fmt.Println(zsk)
 }
